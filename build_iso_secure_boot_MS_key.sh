@@ -175,7 +175,7 @@ setup_iso_environment() {
     echo "microsoft" > airootfs/usr/share/secureboot/key_type
 
     # Copier le script de configuration principal
-    for file in $(ls ./scripts/*.sh); do
+    for file in ./scripts/*.sh; do
         copy_to_iso "$file"
     done
 
