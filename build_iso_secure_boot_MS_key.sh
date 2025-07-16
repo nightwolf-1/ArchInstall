@@ -186,9 +186,9 @@ setup_iso_environment() {
 build_iso() {
     print_info "Construction de l'ISO..."
 
-    iso_version=$(bash ../../extract.sh ./profiledef.sh get iso_version)
-    iso_name=$(bash ../../extract.sh ./profiledef.sh get iso_name)
-    arch=$(bash ../../extract.sh ./profiledef.sh get arch)
+    iso_version=$(bash ./utils/extract.sh ./profiledef.sh get iso_version)
+    iso_name=$(bash ./utils/extract.sh ./profiledef.sh get iso_name)
+    arch=$(bash ./utils/extract.sh ./profiledef.sh get arch)
 
     if [ -z "$iso_version" ]; then
         iso_version=$(date +"%Y.%m.%d")
