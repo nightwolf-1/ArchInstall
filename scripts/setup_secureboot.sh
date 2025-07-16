@@ -83,6 +83,7 @@ sign_boot_components() {
 # Point d’entrée
 # ---------------------
 main() {
+    sed -i 's/# kb_layout = us$/kb_layout = fr/' ~/.config/hpr/hyprland.conf
     connect_wifi "Livebox-8450"
 
     install_dependencies
