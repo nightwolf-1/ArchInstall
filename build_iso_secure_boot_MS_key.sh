@@ -188,8 +188,8 @@ build_iso() {
 
     pwd
     iso_version=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_version)
-    iso_name=$(bash ../../Archinstall/utils/extract.sh ./profiledef.sh get iso_name)
-    arch=$(bash ../../Archinstall/utils/extract.sh ./profiledef.sh get arch)
+    iso_name=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_name)
+    arch=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get arch)
 
     if [ -z "$iso_version" ]; then
         iso_version=$(date +"%Y.%m.%d")
