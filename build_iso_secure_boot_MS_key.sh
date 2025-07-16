@@ -191,11 +191,7 @@ build_iso() {
     iso_name=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_name)
     arch=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get arch)
 
-    if [ -z "$iso_version" ]; then
-        iso_version=$(date +"%Y.%m.%d")
-    fi
-
-    ISO_NAME="${iso_name}-${iso_version}-${arch}.iso"
+    ISO_NAME="${iso_name}-${iso_version}-Custom-${arch}.iso"
     FINAL_ISO="${ISO_NAME/.iso/-SecureBoot-MS.iso}"
 
     # Vérifier si l'ISO finale existe
