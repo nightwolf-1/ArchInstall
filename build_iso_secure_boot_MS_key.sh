@@ -50,9 +50,7 @@ check_secure_boot_tools() {
 
     # Vérifier/créer les clés avec sbctl setup
     if ! sudo sbctl setup --print-state --json | grep -q '"installed": true'; then
-        print_info "Initialisation de sbctl..."
-        sudo sbctl setup
-        print_success "sbctl initialisé"
+        sudo sbctl setup --setup | grep "Your system is not in Setup Mode! Please reboot your machine and reset secure boot keys before attempting to enroll the keys."
     fi
 
     print_success "Outils Secure Boot prêts"
@@ -177,7 +175,7 @@ setup_iso_environment() {
     echo "microsoft" > airootfs/usr/share/secureboot/key_type
 
     # Copier le script de configuration principal
-    for file in ./scripts/*.sh; do
+    for file in $(ls ./scripts/*.sh); do
         copy_to_iso "$file"
     done
 
@@ -363,34 +361,8 @@ test_with_qemu() {
     rm -f "$test_vars"
 }
 
-main() {
-    echo "=== ISO Arch Linux Secure Boot - CLÉS MICROSOFT ==="
-    echo ""
-
-    check_dependencies
-    check_secure_boot_tools
-    setup_iso_environment
-    build_iso
-    extract_and_sign_files
-    rebuild_iso
-
-    echo ""
-    print_success "ISO créée avec succès !"
-    print_info "Fichier: $ISO_DIR/$FINAL_ISO"
-    print_info "Type: Clés Microsoft (compatible partout)"
-
-    echo ""
-    if ask_yes_no "Veux-tu tester l'ISO avec QEMU ?"; then
-        test_with_qemu
-    fi
-
-    if ask_yes_no "Veux-tu écrire l'ISO sur une clé USB ?"; then
-        write_to_usb
-    fi
-
-    echo ""
-    print_success "Terminé !"
-    echo ""
+print_postinstall_message(){
+     echo ""
     print_info "Instructions d'installation:"
     print_info "1. Démarre sur l'ISO (Secure Boot activé)"
     print_info "2. Installe Arch Linux normalement"
@@ -413,6 +385,79 @@ main() {
                     title   Windows
                     efi     /shellx64.efi
                     options -nointerrupt -nomap -noversion HD0d:EFI\Microsoft\Boot\Bootmgfw.efi"
+
+}
+
+ask_test_qemu(){
+    if ask_yes_no "Veux-tu tester l'ISO avec QEMU ?"; then
+        test_with_qemu
+    fi
+}
+
+ask_write_to_usb(){
+    if ask_yes_no "Veux-tu écrire l'ISO sur une clé USB ?"; then
+        write_to_usb
+    fi
+}
+
+show_help() {
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  -b, --build-iso  Build ISO en ajoutant les scripts dans l'iso"
+    echo "  -s, --sign       Build ISO en ajoutant les scripts dans l'iso et signer ATTENTION IL FAUT ETRE EN SETUP MODE"
+    echo "  -l, --list       Lister tous les fichiers détectés"
+    echo "  -a, --all        Créer la configuration ET signer (par défaut)"
+    echo "  -h, --help       Afficher cette aide"
+    echo
+    echo "Détection automatique :"
+    echo "  - Chemins EFI : /boot/efi, /boot, /efi, /boot/esp"
+    echo "  - Fichiers EFI : recherche récursive dans le chemin EFI"
+    echo "  - Noyaux : vmlinuz-*, bzImage-* dans /boot et chemins EFI"
+    echo "  - Initramfs : initramfs-*.img, initrd.img-* dans /boot et chemins EFI"
+    echo
+}
+
+main() {
+    echo "=== ISO Arch Linux Secure Boot - CLÉS MICROSOFT ==="
+    echo ""
+
+    case "${1:-}" in
+        -b|--build-iso)
+            check_dependencies
+            setup_iso_environment
+            build_iso
+            ask_test_qemu
+            ask_write_to_usb
+            echo ""
+            print_success "ISO créée avec succès !"
+            print_info "Fichier: $ISO_DIR/$FINAL_ISO"
+            echo ""
+            print_success "Terminé !"
+            ;;
+        -bs|--build-iso-and-sign)
+            check_dependencies
+            check_secure_boot_tools
+            setup_iso_environment
+            build_iso
+            extract_and_sign_files
+            rebuild_iso
+            echo ""
+            print_success "ISO créée avec succès !"
+            print_info "Fichier: $ISO_DIR/$FINAL_ISO"
+            print_info "Type: Clés Microsoft (compatible partout)"
+            echo ""
+            print_success "Terminé !"
+            ;;
+        -h|--help)
+            show_help
+            ;;
+        *)
+            print_error "Option inconnue : ${1:-<aucune>}"
+            show_help
+            exit 1
+            ;;
+    esac
 
 }
 
