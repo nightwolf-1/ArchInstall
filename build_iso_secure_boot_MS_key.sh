@@ -186,6 +186,7 @@ setup_iso_environment() {
 build_iso() {
     print_info "Construction de l'ISO..."
 
+    pwd
     iso_version=$(bash ./utils/extract.sh ./profiledef.sh get iso_version)
     iso_name=$(bash ./utils/extract.sh ./profiledef.sh get iso_name)
     arch=$(bash ./utils/extract.sh ./profiledef.sh get arch)
