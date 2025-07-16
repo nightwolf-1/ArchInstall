@@ -174,7 +174,7 @@ setup_iso_environment() {
     mkdir -p airootfs/usr/share/secureboot/
     echo "microsoft" > airootfs/usr/share/secureboot/key_type
 
-    ls ../../scripts/*.sh
+    ls ../../scripts/ | grep ".sh$"
 
     # Copier le script de configuration principal
     for file in ../../scripts/*.sh; do
