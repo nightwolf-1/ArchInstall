@@ -26,36 +26,49 @@ install_hyde() {
 }
 
 create_windows_config() {
-    local alias_name
-    local config_dir="/boot/esp/loader/entries"
+    local alias_name title_name disk_path
+    local config_dir="/boot/loader/entries"
     local config_file
-    
+
     # Demander l'alias à l'utilisateur
     while true; do
-        read -p "Entrez l'alias pour la configuration Windows (ex: windows, win10, win11): " alias_name
+        read -rp "Entrez l'alias pour la configuration Windows (ex: windows, win10, windows11): " alias_name
         if [[ -n "$alias_name" && "$alias_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
             break
         else
-            log_error "Alias invalide. Utilisez uniquement des lettres, chiffres, tirets et underscores."
+            log_error "Alias invalide. Utilisez uniquement lettres, chiffres, tirets ou underscores."
         fi
     done
-    
+
+    # Convertir l'alias en Title lisible (ex: windows11 → Windows 11)
+    title_name=$(echo "$alias_name" | sed -E 's/([a-zA-Z]+)([0-9]*)/\u\1 \2/')
+
+    # Demander le chemin EFI Shell (ex: HD0d)
+    while true; do
+        read -rp "Entrez le chemin de démarrage EFI depuis le Shell (ex: HD0d) : " disk_path
+        if [[ "$disk_path" =~ ^HD[0-9]+[a-zA-Z]?$ ]]; then
+            break
+        else
+            log_error "Format incorrect. Exemple attendu : HD0d"
+        fi
+    done
+
     config_file="${config_dir}/${alias_name}.conf"
-    
+
     # Créer le répertoire si nécessaire
     if [[ ! -d "$config_dir" ]]; then
         log_info "Création du répertoire $config_dir"
         sudo mkdir -p "$config_dir"
     fi
-    
+
     # Créer le fichier de configuration
     log_info "Création du fichier de configuration $config_file"
     sudo tee "$config_file" > /dev/null << EOF
-title   Windows
+title   $title_name
 efi     /shellx64.efi
-options -nointerrupt -nomap -noversion HD0d:EFI\\Microsoft\\Boot\\Bootmgfw.efi
+options -nointerrupt -nomap -noversion ${disk_path}:EFI\\Microsoft\\Boot\\Bootmgfw.efi
 EOF
-    
+
     if [[ $? -eq 0 ]]; then
         log_success "Fichier de configuration créé : $config_file"
         log_info "Contenu du fichier :"
@@ -70,6 +83,7 @@ main() {
     # connect_wifi "TonSSID"   # ← décommente si besoin de Wi-Fi
 
    install_hyde
+   create_windows_config
 }
 
 main "$@"
