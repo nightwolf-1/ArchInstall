@@ -42,7 +42,7 @@ extract_var_direct() {
         # Si c'est une commande date avec SOURCE_DATE_EPOCH
         if [[ "$raw_value" =~ \$\(date.*SOURCE_DATE_EPOCH ]]; then
             # Extraire SOURCE_DATE_EPOCH du fichier
-            local source_date_epoch=$(grep "^SOURCE_DATE_EPOCH=" "$file" | head -1 | sed 's/^SOURCE_DATE_EPOCH="\?\([^"]*\)"\?/\1/')
+            local source_date_epoch=$(grep "^SOURCE_DATE_EPOCH=" "$file" | head -1 | sed 's/^SOURCE_DATE_EPOCH="\(.*\)"/\1/')
             
             if [[ -n "$source_date_epoch" ]]; then
                 # Utiliser SOURCE_DATE_EPOCH
@@ -51,34 +51,10 @@ extract_var_direct() {
                 # Fallback sur date actuelle
                 date +%Y.%m.%d
             fi
-        # Si c'est une commande date simple comme $(date +%Y.%m.%d)
-        elif [[ "$raw_value" =~ \$\(date[[:space:]]+\+%Y\.%m\.%d\) ]]; then
-            date +%Y.%m.%d
-        # Si c'est une commande date avec autre format
-        elif [[ "$raw_value" =~ \$\(date.*\+[^)]+\) ]]; then
-            # Extraire le format
-            local format=$(echo "$raw_value" | sed 's/.*+\([^)]*\).*/\1/')
-            date +"$format"
-        # Pattern plus complexe pour archlinux: ARCH_YYYYMMDD
-        elif [[ "$raw_value" =~ ARCH_[0-9]{8} ]]; then
-            # Extraire la date du pattern ARCH_YYYYMMDD et la convertir
-            local arch_date=$(echo "$raw_value" | sed 's/.*ARCH_\([0-9]\{8\}\).*/\1/')
-            if [[ -n "$arch_date" && ${#arch_date} -eq 8 ]]; then
-                # Convertir YYYYMMDD en YYYY.MM.DD
-                echo "${arch_date:0:4}.${arch_date:4:2}.${arch_date:6:2}"
-            else
-                # Fallback
-                date +%Y.%m.%d
-            fi
-        # Si c'est une autre commande, essayer de l'exécuter directement
-        elif [[ "$raw_value" =~ \$\( ]]; then
-            # Créer un environnement minimal pour l'exécution
-            (
-                # Sourcer les variables simples nécessaires
-                source_simple_vars "$file"
-                # Exécuter la commande substituée
-                bash -c "echo $raw_value"
-            ) 2>/dev/null || echo ""
+        # Si c'est une autre commande date
+        elif [[ "$raw_value" =~ \$\(date ]]; then
+            # Exécuter la commande date directement
+            bash -c "echo \"$raw_value\""
         else
             echo "$raw_value"
         fi

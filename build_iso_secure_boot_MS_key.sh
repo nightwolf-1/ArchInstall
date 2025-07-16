@@ -187,7 +187,7 @@ build_iso() {
     print_info "Construction de l'ISO..."
 
     pwd
-    iso_version=$(bash ../../Archinstall/utils/extract.sh ./profiledef.sh get iso_version)
+    iso_version=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_version)
     iso_name=$(bash ../../Archinstall/utils/extract.sh ./profiledef.sh get iso_name)
     arch=$(bash ../../Archinstall/utils/extract.sh ./profiledef.sh get arch)
 
