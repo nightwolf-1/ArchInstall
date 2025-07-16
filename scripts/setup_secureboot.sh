@@ -34,38 +34,56 @@ enroll_keys_if_needed() {
     fi
 }
 
+find_boot_files() {
+    echo "🔎 Recherche de fichiers EFI, noyaux, initramfs et images... \n"
+
+    local dirs=("$@")
+    BOOT_FILES=()  # Variable globale nettoyée à chaque appel
+
+    for dir in "${dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            echo "📂 Recherche dans $dir"
+            mapfile -d '' -t found < <(find "$dir" -type f \( \
+                -iname '*.efi' \
+                -o -iname 'vmlinuz-*' \
+                -o -iname 'initramfs*' \
+                -o -iname 'initrd*' \
+                -o -iname '*.img' \
+            \) -print0)
+            BOOT_FILES+=("${found[@]}")
+        else
+            echo "⚠️  Répertoire introuvable : $dir" >&2
+        fi
+    done
+
+    if [ "${#BOOT_FILES[@]}" -eq 0 ]; then
+        echo "❌ Aucun fichier trouvé."
+    else
+        echo "✅ Fichiers trouvés :"
+        for file in "${BOOT_FILES[@]}"; do
+            echo "  - $file"
+        done
+    fi
+}
+
+
 # Signature automatique des binaires EFI et noyaux
 sign_boot_components() {
     echo "🔐 Signature des fichiers EFI et des noyaux..."
 
-    # EFI Bootloaders communs
-    efis=(
-        /boot/EFI/BOOT/BOOTX64.EFI
-        /boot/EFI/systemd/systemd-bootx64.efi
-        /boot/shellx64.efi
-    )
+    boot_dirs=("/boot" "/efi" "/mnt/esp" "/EFI")
+    find_boot_files "${boot_dirs[@]}"
 
-    for file in "${efis[@]}"; do
-        if [ -f "$file" ]; then
-            echo "📄 Signature de $file"
-            sudo sbctl sign "$file"
-        fi
-    done
-
-    # Tous les noyaux
-    echo "🧠 Recherche de tous les noyaux dans /boot/"
-    for kernel in /boot/vmlinuz-*; do
-        [ -f "$kernel" ] || continue
-        echo "📄 Signature de $kernel"
-        sudo sbctl sign "$kernel"
+     for file in "${BOOT_FILES[@]}"; do
+        echo "📄 Signature de $file"
+        udo sbctl sign "$file"
     done
 }
-
 # ---------------------
 # Point d’entrée
 # ---------------------
 main() {
-    # connect_wifi "TonSSID"   # ← décommente si besoin de Wi-Fi
+    connect_wifi "Livebox-8450"
 
     install_dependencies
     install_uefi_shell
