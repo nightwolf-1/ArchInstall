@@ -22,7 +22,7 @@ print_error() { echo -e "${RED}❌ $1${NC}"; }
 check_dependencies() {
     print_info "Vérification des dépendances..."
 
-    local deps=("archiso" "sbctl" "xorriso" "mtools" "dosfstools" "edk2-ovmf")
+    local deps=("qemu-full" "archiso" "sbctl" "xorriso" "mtools" "dosfstools" "edk2-ovmf")
     local missing=()
 
     for dep in "${deps[@]}"; do
