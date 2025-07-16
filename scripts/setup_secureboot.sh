@@ -21,7 +21,7 @@ install_uefi_shell() {
 
 # Création des clés Secure Boot
 create_secureboot_keys() {
-    sudo sbctl create-key
+    sudo sbctl create-keys
 }
 
 # Vérifie et enrôle les clés si nécessaire
