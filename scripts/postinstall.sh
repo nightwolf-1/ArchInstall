@@ -16,7 +16,6 @@ install_hyde() {
     git clone --depth 1 https://github.com/HyDE-Project/HyDE ~/HyDE
     cd ~/HyDE/Scripts
     ./install.sh
-    sed -i 's/# kb_layout = us$/kb_layout = fr/' ~/.config/hpr/userprefs.conf
     sed -i 's/ForceHideCompletePassword="false"$/ForceHideCompletePassword="true"/' /usr/share/sddm/themes/Candy/theme.conf
     sed -i 's/exec-once = uwsm app -t service -s s -- $start\.BAR || $start\.BAR # waybar\.py --watch (daemon)$/exec-once = sleep 1 \&\& (uwsm app -t service -s s -- $start.BAR || $start.BAR) # waybar.py --watch (daemon)/' ~/.local/share/hyde/hyprland.conf
     
