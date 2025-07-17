@@ -1,0 +1,1 @@
+sed -i 's/# kb_layout = us$/kb_layout = fr/' ~/.config/hpr/userprefs.conf   
