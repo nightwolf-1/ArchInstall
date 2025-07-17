@@ -76,6 +76,7 @@ check_package_installed() {
     pacman -Q "$package" &>/dev/null
 }
 
+
 get_missing_packages() {
     local deps=("$@")
     local missing=()
@@ -86,22 +87,33 @@ get_missing_packages() {
         fi
     done
 
-    printf '%s\n' "${missing[@]}"
+    # Correction : ne pas utiliser printf si le tableau est vide
+    if [ ${#missing[@]} -gt 0 ]; then
+        printf '%s\n' "${missing[@]}"
+    fi
 }
 
 install_packages() {
     local packages=("$@")
-    
-    if [ ${#packages[@]} -eq 0 ]; then
+
+    # Correction : filtrer les éléments vides
+    local filtered_packages=()
+    for pkg in "${packages[@]}"; do
+        if [[ -n "$pkg" ]]; then
+            filtered_packages+=("$pkg")
+        fi
+    done
+
+    if [ ${#filtered_packages[@]} -eq 0 ]; then
         return 0
     fi
-    
-    print_warning "Paquets manquants détectés: ${packages[*]}"
-    
+
+    print_warning "Paquets manquants détectés: ${filtered_packages[*]}"
+
     if ask_yes_no "Veux-tu installer automatiquement les paquets manquants ?"; then
         print_info "Installation des paquets manquants..."
-        
-        if sudo pacman -S --needed "${packages[@]}"; then
+
+        if sudo pacman -S --needed "${filtered_packages[@]}"; then
             print_success "Paquets installés avec succès"
             return 0
         else
@@ -110,7 +122,7 @@ install_packages() {
         fi
     else
         print_error "Impossible de continuer sans les paquets requis"
-        echo "Installe-les manuellement avec: sudo pacman -S ${packages[*]}"
+        echo "Installe-les manuellement avec: sudo pacman -S ${filtered_packages[*]}"
         return 1
     fi
 }
@@ -119,9 +131,14 @@ check_dependencies() {
     print_info "Vérification des dépendances..."
 
     local deps=("archiso" "sbctl" "xorriso" "mtools" "dosfstools" "edk2-ovmf")
-    local missing
-    
-    readarray -t missing < <(get_missing_packages "${deps[@]}")
+    local missing=()
+
+    # Correction : utiliser une boucle directe pour éviter les éléments vides
+    for dep in "${deps[@]}"; do
+        if ! check_package_installed "$dep"; then
+            missing+=("$dep")
+        fi
+    done
 
     if [ ${#missing[@]} -gt 0 ]; then
         if ! install_packages "${missing[@]}"; then
