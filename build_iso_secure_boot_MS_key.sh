@@ -6,6 +6,7 @@ set -euo pipefail
 ISO_DIR="$HOME/secureboot-iso"
 ARCHISO_PROFILE="releng"
 TMP_MOUNT="$ISO_DIR/tmpmnt"
+SCRIPT_MODE=""  # Variable pour stocker le mode du script
 
 # Couleurs pour l'affichage
 RED='\033[0;31m'
@@ -19,10 +20,89 @@ print_success() { echo -e "${GREEN}✅ $1${NC}"; }
 print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 print_error() { echo -e "${RED}❌ $1${NC}"; }
 
+# Fonction pour détecter les fichiers OVMF
+detect_ovmf_files() {
+    local ovmf_dir="/usr/share/edk2-ovmf/x64"
+    local ovmf_code="" ovmf_vars=""
+    
+    if [[ "$SCRIPT_MODE" == "sign" ]]; then
+        # Pour les ISOs signées, chercher les fichiers Secure Boot
+        if [ -f "$ovmf_dir/OVMF_CODE.secboot.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.secboot.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.fd"
+        elif [ -f "$ovmf_dir/OVMF_CODE.secboot.4m.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.secboot.4m.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.4m.fd"
+        fi
+    else
+        # Pour les ISOs non signées, chercher les fichiers standard
+        if [ -f "$ovmf_dir/OVMF_CODE.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.fd"
+        elif [ -f "$ovmf_dir/OVMF_CODE.4m.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.4m.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.4m.fd"
+        fi
+    fi
+    
+    # Si les fichiers spécifiques ne sont pas trouvés, essayer les alternatives
+    if [ -z "$ovmf_code" ] || [ -z "$ovmf_vars" ]; then
+        print_warning "Fichiers OVMF préférés non trouvés, recherche d'alternatives..."
+        
+        # Chercher n'importe quel fichier CODE disponible
+        if [ -f "$ovmf_dir/OVMF_CODE.4m.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.4m.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.4m.fd"
+        elif [ -f "$ovmf_dir/OVMF_CODE.secboot.4m.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.secboot.4m.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.4m.fd"
+        elif [ -f "$ovmf_dir/OVMF_CODE.fd" ]; then
+            ovmf_code="$ovmf_dir/OVMF_CODE.fd"
+            ovmf_vars="$ovmf_dir/OVMF_VARS.fd"
+        fi
+    fi
+    
+    # Vérifier que les fichiers existent
+    if [ ! -f "$ovmf_code" ] || [ ! -f "$ovmf_vars" ]; then
+        print_error "Impossible de trouver les fichiers OVMF dans $ovmf_dir"
+        print_info "Fichiers disponibles :"
+        ls -la "$ovmf_dir" 2>/dev/null || print_error "Répertoire OVMF introuvable"
+        return 1
+    fi
+    
+    echo "$ovmf_code:$ovmf_vars"
+}
+
+install_missing_packages() {
+    local missing_packages=("$@")
+    
+    if [ ${#missing_packages[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    print_warning "Paquets manquants détectés: ${missing_packages[*]}"
+    
+    if ask_yes_no "Veux-tu installer automatiquement les paquets manquants ?"; then
+        print_info "Installation des paquets manquants..."
+        
+        if sudo pacman -S --needed "${missing_packages[@]}"; then
+            print_success "Paquets installés avec succès"
+            return 0
+        else
+            print_error "Échec de l'installation des paquets"
+            return 1
+        fi
+    else
+        print_error "Impossible de continuer sans les paquets requis"
+        echo "Installe-les manuellement avec: sudo pacman -S ${missing_packages[*]}"
+        return 1
+    fi
+}
+
 check_dependencies() {
     print_info "Vérification des dépendances..."
 
-    local deps=("qemu-full" "archiso" "sbctl" "xorriso" "mtools" "dosfstools" "edk2-ovmf")
+    local deps=("archiso" "sbctl" "xorriso" "mtools" "dosfstools" "edk2-ovmf")
     local missing=()
 
     for dep in "${deps[@]}"; do
@@ -32,12 +112,12 @@ check_dependencies() {
     done
 
     if [ ${#missing[@]} -gt 0 ]; then
-        print_error "Dépendances manquantes: ${missing[*]}"
-        echo "Installe-les avec: sudo pacman -S ${missing[*]}"
-        exit 1
+        if ! install_missing_packages "${missing[@]}"; then
+            exit 1
+        fi
+    else
+        print_success "Toutes les dépendances sont installées"
     fi
-
-    print_success "Toutes les dépendances sont installées"
 }
 
 check_secure_boot_tools() {
@@ -45,12 +125,23 @@ check_secure_boot_tools() {
 
     if ! command -v sbctl &> /dev/null; then
         print_error "sbctl n'est pas installé"
-        exit 1
+        if ask_yes_no "Veux-tu installer sbctl ?"; then
+            if ! install_missing_packages "sbctl"; then
+                exit 1
+            fi
+        else
+            exit 1
+        fi
     fi
 
     # Vérifier/créer les clés avec sbctl setup
     if ! sudo sbctl setup --print-state --json | grep -q '"installed": true'; then
-        sudo sbctl setup --setup | grep "Your system is not in Setup Mode! Please reboot your machine and reset secure boot keys before attempting to enroll the keys."
+        print_warning "Les clés Secure Boot ne sont pas configurées"
+        if ask_yes_no "Veux-tu configurer les clés Secure Boot maintenant ?"; then
+            sudo sbctl setup --setup
+        else
+            print_warning "Attention: Les clés ne sont pas configurées, la signature pourrait échouer"
+        fi
     fi
 
     print_success "Outils Secure Boot prêts"
@@ -150,7 +241,6 @@ copy_to_iso() {
     chmod +x "$dest"
 }
 
-
 setup_iso_environment() {
     print_info "Configuration de l'environnement ISO..."
 
@@ -175,10 +265,15 @@ setup_iso_environment() {
     echo "microsoft" > airootfs/usr/share/secureboot/key_type
 
     # Copier le script de configuration principal
-    for file in ../../ArchInstall/scripts/*.sh; do
-        copy_to_iso "$file"
-    done
-
+    if [ -d "../../ArchInstall/scripts" ]; then
+        for file in ../../ArchInstall/scripts/*.sh; do
+            if [ -f "$file" ]; then
+                copy_to_iso "$file"
+            fi
+        done
+    else
+        print_warning "Répertoire ../../ArchInstall/scripts non trouvé"
+    fi
 
     print_success "Environnement ISO configuré avec support Microsoft"
 }
@@ -187,34 +282,40 @@ build_iso() {
     print_info "Construction de l'ISO..."
 
     pwd
-    iso_version=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_version)
-    iso_name=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_name)
-    arch=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get arch)
+    iso_version=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_version 2>/dev/null || echo "latest")
+    iso_name=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get iso_name 2>/dev/null || echo "archlinux")
+    arch=$(bash ../../ArchInstall/utils/extract.sh ./profiledef.sh get arch 2>/dev/null || echo "x86_64")
 
-    ISO_NAME="${iso_name}-${iso_version}-Custom-${arch}.iso"
-    FINAL_ISO="${ISO_NAME/.iso/-SecureBoot-MS.iso}"
+    ISO_NAME="${iso_name}-${iso_version}-${arch}.iso"
+    
+    # Définir le nom final selon le mode
+    if [[ "$SCRIPT_MODE" == "sign" ]]; then
+        FINAL_ISO="${ISO_NAME/.iso/-SecureBoot-MS-Signed.iso}"
+        FINAL_ISO_PATH="$ISO_DIR/$FINAL_ISO"
+    else
+        # En mode build, l'ISO finale est dans out/
+        FINAL_ISO="$ISO_NAME"
+        FINAL_ISO_PATH="$ISO_DIR/$ARCHISO_PROFILE/out/$ISO_NAME"
+    fi
 
     # Vérifier si l'ISO finale existe
-    if [ -f "$ISO_DIR/$FINAL_ISO" ]; then
+    if [ -f "$FINAL_ISO_PATH" ]; then
         print_warning "L'ISO finale existe déjà : $FINAL_ISO"
         if ask_yes_no "Veux-tu la supprimer et la recréer ?"; then
-            rm -f "$ISO_DIR/$FINAL_ISO"
+            sudo rm -f "$FINAL_ISO_PATH"
         else
             print_info "Utilisation de l'ISO existante"
             return 0
         fi
     fi
 
-    # Construire l'ISO de base
+    # Forcer la reconstruction pour prendre en compte les scripts modifiés
     if [ -f "$ISO_DIR/$ARCHISO_PROFILE/out/$ISO_NAME" ]; then
-        print_info "L'ISO de base existe déjà : $ISO_NAME"
-        if ask_yes_no "Veux-tu la regénérer ?"; then
-            sudo mkarchiso -vr ./
-        fi
-    else
-        sudo mkarchiso -vr ./
+        print_info "Suppression de l'ancienne ISO pour prendre en compte les modifications..."
+        rm -f "$ISO_DIR/$ARCHISO_PROFILE/out/$ISO_NAME"
     fi
-
+    
+    sudo mkarchiso -vr ./
     print_success "ISO de base construite"
 }
 
@@ -281,7 +382,7 @@ rebuild_iso() {
 
     # Reconstruire l'ISO selon la documentation Arch
     sudo xorriso -indev "$ISO_DIR/$ARCHISO_PROFILE/out/$ISO_NAME" \
-        -outdev "$ISO_DIR/$FINAL_ISO" \
+        -outdev "$FINAL_ISO_PATH" \
         -map vmlinuz-linux /arch/boot/x86_64/vmlinuz-linux \
         -map_l ./ /EFI/BOOT/ BOOTx64.EFI BOOTIA32.EFI -- \
         -map_l ./ / shellx64.efi shellia32.efi -- \
@@ -324,65 +425,98 @@ write_to_usb() {
     sudo umount "/dev/${device}"* 2>/dev/null || true
 
     print_info "Écriture en cours..."
-    sudo dd if="$ISO_DIR/$FINAL_ISO" of="/dev/$device" bs=4M status=progress oflag=sync
+    
+    # Utiliser l'ISO appropriée selon le mode
+    if [ ! -f "$FINAL_ISO_PATH" ]; then
+        print_error "ISO non trouvée: $FINAL_ISO_PATH"
+        return 1
+    fi
+    
+    print_info "ISO utilisée: $FINAL_ISO_PATH"
+    sudo dd if="$FINAL_ISO_PATH" of="/dev/$device" bs=4M status=progress oflag=sync
 
     print_success "ISO écrite sur /dev/$device"
 }
 
 test_with_qemu() {
     print_info "Test avec QEMU..."
+    
+    # Détecter les fichiers OVMF
+    local ovmf_files
+    if ! ovmf_files=$(detect_ovmf_files); then
+        print_error "Impossible de détecter les fichiers OVMF"
+        return 1
+    fi
+    
+    local ovmf_code="${ovmf_files%:*}"
+    local ovmf_vars="${ovmf_files#*:}"
+    
+    if [[ "$SCRIPT_MODE" == "sign" ]]; then
+        print_info "Mode: Test avec Secure Boot activé (ISO signée)"
+    else
+        print_info "Mode: Test sans Secure Boot (ISO non signée)"
+    fi
 
-    local ovmf_code="/usr/share/edk2-ovmf/x64/OVMF_CODE.secboot.fd"
-    local ovmf_vars="/usr/share/edk2-ovmf/x64/OVMF_VARS.fd"
-
-    if [ ! -f "$ovmf_code" ] || [ ! -f "$ovmf_vars" ]; then
-        print_error "Fichiers OVMF manquants"
+    # Vérifier que l'ISO existe
+    if [ ! -f "$FINAL_ISO_PATH" ]; then
+        print_error "ISO non trouvée: $FINAL_ISO_PATH"
         return 1
     fi
 
-    local test_vars="/tmp/OVMF_VARS_test.fd"
+    local test_vars="/tmp/OVMF_VARS_test_$(date +%s).fd"
     cp "$ovmf_vars" "$test_vars"
 
-    print_info "Lancement de QEMU avec Secure Boot..."
+    print_info "Lancement de QEMU..."
+    print_info "ISO testée: $FINAL_ISO_PATH"
+    print_info "OVMF CODE: $ovmf_code"
+    print_info "OVMF VARS: $ovmf_vars"
 
-    qemu-system-x86_64 \
-        -m 2048 \
-        -enable-kvm \
-        -smp 2 \
-        -drive if=pflash,format=raw,readonly=on,file="$ovmf_code" \
-        -drive if=pflash,format=raw,file="$test_vars" \
-        -drive if=ide,media=cdrom,file="$ISO_DIR/$FINAL_ISO" \
-        -net nic -net user \
+    # Paramètres QEMU adaptés
+    local qemu_params=(
+        -m 2048
+        -smp 2
+        -drive "if=pflash,format=raw,readonly=on,file=$ovmf_code"
+        -drive "if=pflash,format=raw,file=$test_vars"
+        -drive "if=ide,media=cdrom,file=$FINAL_ISO_PATH"
+        -net nic -net user
         -vga virtio
+    )
+    
+    # Ajouter KVM si disponible
+    if [ -c /dev/kvm ]; then
+        qemu_params+=(-enable-kvm)
+    fi
+
+    qemu-system-x86_64 "${qemu_params[@]}"
 
     rm -f "$test_vars"
+    print_success "Test QEMU terminé"
 }
 
 print_postinstall_message(){
-     echo ""
+    echo ""
     print_info "Instructions d'installation:"
     print_info "1. Démarre sur l'ISO (Secure Boot activé)"
     print_info "2. Installe Arch Linux normalement"
-    print_info "3. Récupère le PARTUUID de la partion EFI de mircosoft blkid | grep vfat prendre en photo"
+    print_info "3. Récupère le PARTUUID de la partition EFI de Microsoft: blkid | grep vfat (prendre en photo)"
     print_info "4. Lance systemctl reboot --firmware-setup et met secure boot en mode setup"
-    print_info "5. Redémarre avec Secure Boot activé sur l'Iso"
-    print_info "6. nmcli device wlan0 connect SSID --ask "
+    print_info "5. Redémarre avec Secure Boot activé sur l'ISO"
+    print_info "6. nmcli device wifi connect SSID --ask"
     print_info "7. sudo pacman -Sy --needed sbctl edk2-shell"
     print_info "8. sudo cp /usr/share/edk2-shell/x64/Shell.efi /boot/shellx64.efi"
     print_info "9. sudo sbctl create-keys"
-    print_info "10. sudo sbctl enroll-keys -m pour garder les clés Microsoft"
-    print_info "11. sudo sbctl sign /boot/EFI/BOOT/BOOX64.EFI"
+    print_info "10. sudo sbctl enroll-keys -m (pour garder les clés Microsoft)"
+    print_info "11. sudo sbctl sign /boot/EFI/BOOT/BOOTx64.EFI"
     print_info "12. sudo sbctl sign /boot/EFI/systemd/systemd-bootx64.efi"
-    print_info "13. sudo sbctl sign /boot/sellx64.efi"
-    print_info "14. sudo sbctl sign /boot/vmlinuz-linux-lts" #Signature des noyaux
+    print_info "13. sudo sbctl sign /boot/shellx64.efi"
+    print_info "14. sudo sbctl sign /boot/vmlinuz-linux-lts"
     print_info "15. sudo sbctl sign /boot/vmlinuz-linux-zen"
-    print_info "16. Reboot sur le shell efi et récupérer l'alias ex: HD0d ou BLk7"
-    print_info "Reboot après avoir trouver l'alias et créer un fichier avec ce contenue ou HD0d est l'alias
-    esp/loader/entries/windows.conf
-                    title   Windows
-                    efi     /shellx64.efi
-                    options -nointerrupt -nomap -noversion HD0d:EFI\Microsoft\Boot\Bootmgfw.efi"
-
+    print_info "16. Reboot sur le shell EFI et récupérer l'alias (ex: HD0d ou BLk7)"
+    print_info "17. Créer un fichier esp/loader/entries/windows.conf avec:"
+    print_info "    title   Windows"
+    print_info "    efi     /shellx64.efi"
+    print_info "    options -nointerrupt -nomap -noversion HD0d:EFI\\Microsoft\\Boot\\Bootmgfw.efi"
+    print_info "    (où HD0d est l'alias trouvé à l'étape 16)"
 }
 
 ask_test_qemu(){
@@ -401,17 +535,22 @@ show_help() {
     echo "Usage: $0 [OPTIONS]"
     echo
     echo "Options:"
-    echo "  -b, --build-iso  Build ISO en ajoutant les scripts dans l'iso"
-    echo "  -s, --sign       Build ISO en ajoutant les scripts dans l'iso et signer ATTENTION IL FAUT ETRE EN SETUP MODE"
-    echo "  -l, --list       Lister tous les fichiers détectés"
-    echo "  -a, --all        Créer la configuration ET signer (par défaut)"
-    echo "  -h, --help       Afficher cette aide"
+    echo "  -b, --build-iso    Build ISO en ajoutant les scripts dans l'ISO"
+    echo "  -bs, --build-sign  Build ISO et signer (ATTENTION: il faut être en setup mode)"
+    echo "  -h, --help         Afficher cette aide"
+    echo
+    echo "Fonctionnalités :"
+    echo "  - Installation automatique des paquets manquants"
+    echo "  - Test QEMU adapté selon le mode (avec/sans Secure Boot)"
+    echo "  - Reconstruction forcée pour prendre en compte les scripts modifiés"
+    echo "  - Détection automatique des fichiers OVMF"
     echo
     echo "Détection automatique :"
     echo "  - Chemins EFI : /boot/efi, /boot, /efi, /boot/esp"
     echo "  - Fichiers EFI : recherche récursive dans le chemin EFI"
     echo "  - Noyaux : vmlinuz-*, bzImage-* dans /boot et chemins EFI"
     echo "  - Initramfs : initramfs-*.img, initrd.img-* dans /boot et chemins EFI"
+    echo "  - Fichiers OVMF : détection automatique (.fd, .4m.fd, .secboot.fd)"
     echo
 }
 
@@ -421,6 +560,7 @@ main() {
 
     case "${1:-}" in
         -b|--build-iso)
+            SCRIPT_MODE="build"
             check_dependencies
             setup_iso_environment
             build_iso
@@ -428,21 +568,27 @@ main() {
             ask_write_to_usb
             echo ""
             print_success "ISO créée avec succès !"
-            print_info "Fichier: $ISO_DIR/$FINAL_ISO"
+            print_info "Fichier: $FINAL_ISO_PATH"
+            print_info "Type: Non signée (compatible avec Secure Boot désactivé)"
+            print_postinstall_message
             echo ""
             print_success "Terminé !"
             ;;
-        -bs|--build-iso-and-sign)
+        -bs|--build-sign)
+            SCRIPT_MODE="sign"
             check_dependencies
             check_secure_boot_tools
             setup_iso_environment
             build_iso
             extract_and_sign_files
             rebuild_iso
+            ask_test_qemu
+            ask_write_to_usb
             echo ""
             print_success "ISO créée avec succès !"
-            print_info "Fichier: $ISO_DIR/$FINAL_ISO"
-            print_info "Type: Clés Microsoft (compatible partout)"
+            print_info "Fichier: $FINAL_ISO_PATH"
+            print_info "Type: Signée avec clés Microsoft (compatible partout)"
+            print_postinstall_message
             echo ""
             print_success "Terminé !"
             ;;
@@ -455,11 +601,9 @@ main() {
             exit 1
             ;;
     esac
-
 }
 
-# Gestion des signaux
-
+# Vérification des privilèges
 if [[ $EUID -eq 0 ]]; then
     print_error "Ne pas exécuter ce script en tant que root"
     exit 1

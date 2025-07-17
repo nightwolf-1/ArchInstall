@@ -85,5 +85,6 @@ main() {
     # connect_wifi "TonSSID"   # ← décommente si besoin de Wi-Fi
    install_hyde
    create_windows_config
+   yay -Sy --needed brave-browser
 }
 main "$@"
