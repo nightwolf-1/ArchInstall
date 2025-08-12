@@ -17,7 +17,6 @@ install_hyde() {
     cd ~/HyDE/Scripts
     ./install.sh
     sed -i 's/ForceHideCompletePassword="false"$/ForceHideCompletePassword="true"/' /usr/share/sddm/themes/Candy/theme.conf
-    sed -i 's/exec-once = uwsm app -t service -s s -- $start\.BAR || $start\.BAR # waybar\.py --watch (daemon)$/exec-once = sleep 1 \&\& (uwsm app -t service -s s -- $start.BAR || $start.BAR) # waybar.py --watch (daemon)/' ~/.local/share/hyde/hyprland.conf
     
     # Commenter tout le bloc listener qui contient systemctl suspend
     sed -i '/listener {/{
